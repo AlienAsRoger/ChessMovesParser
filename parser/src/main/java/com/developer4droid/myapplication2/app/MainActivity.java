@@ -44,42 +44,7 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 	}
 
 
-	private int calculateEndIndexOfAlternates(String movesList) {
-		int start = movesList.indexOf(Symbol.LEFT_PAR);
-		int end = movesList.indexOf(Symbol.RIGHT_PAR);
-		if (start == -1) { // if no parenthesis, quit
-			return end;
-		}
 
-		if (end == -1) { // if there is no closing par-s
-			end = movesList.length() - 1;
-		}
-		int newEnd = end;
-		int newStart = start;
-		String tempMoveList = movesList;
-		// if there are ( (1) (2) (3) ), then remove (1) (2) (3)
-		int removedLength = 0;
-		while (true) {
-			String testMoveList = tempMoveList.substring(newStart + 1, newEnd);
-			if (!testMoveList.contains(Symbol.LEFT_PAR)) { // if not contains start of new moves, then done
-				break;
-			}
-			// remove first block
-			int secondStart = testMoveList.indexOf(Symbol.LEFT_PAR);
-			String blockToRemove = tempMoveList.substring(newStart + secondStart, newEnd + 1);
-			removedLength += blockToRemove.length();
-			tempMoveList = tempMoveList.replace(blockToRemove, Symbol.EMPTY);
-
-			newStart = tempMoveList.indexOf(Symbol.LEFT_PAR);
-			newEnd = tempMoveList.indexOf(Symbol.RIGHT_PAR);
-			if (newEnd == -1) { // if there is no closing par-s
-				newEnd = tempMoveList.length() - 1;
-			}
-		}
-
-		end = newEnd + removedLength;
-		return end;
-	}
 
 	public String removeCommentsAndAlternatesFromMovesList(String movesList, HashMap<String, String> alterMovesMap) {
 		// replace all special symbols
@@ -105,6 +70,46 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 			movesList = movesList.replaceAll(key, annotationsMapping.get(key));
 		}
 		return movesList;
+	}
+
+	private int calculateEndIndexOfAlternates(String movesList) {
+		int start = movesList.indexOf(Symbol.LEFT_PAR);
+		int end = movesList.indexOf(Symbol.RIGHT_PAR);
+		if (start == -1) { // if no parenthesis, quit
+			return end;
+		}
+
+		if (end == -1) { // if there is no closing par-s
+			end = movesList.length() - 1;
+		}
+		int newEnd = end;
+		int newStart = start;
+		String tempMoveList = movesList;
+		// if there are ( (1) (2) (3) ), then remove (1) (2) (3)
+		int removedLength = 0;
+		while (true) {
+			if (newEnd < newStart + 1) {
+				break;
+			}
+			String testMoveList = tempMoveList.substring(newStart + 1, newEnd);
+			if (!testMoveList.contains(Symbol.LEFT_PAR)) { // if not contains start of new moves, then done
+				break;
+			}
+			// remove inner block
+			int secondStart = testMoveList.indexOf(Symbol.LEFT_PAR);
+			String blockToRemove = tempMoveList.substring(newStart + secondStart, newEnd + 1);
+			removedLength += blockToRemove.length();
+			tempMoveList = tempMoveList.replace(blockToRemove, Symbol.EMPTY);
+
+			newStart = tempMoveList.indexOf(Symbol.LEFT_PAR);
+			newEnd = tempMoveList.indexOf(Symbol.RIGHT_PAR);
+			if (newEnd == -1) { // if there is no closing par-s
+				newEnd = tempMoveList.length() - 1;
+			}
+		}
+
+		end = newEnd + removedLength;
+		return end;
 	}
 
 	public String removeAlternateMoves(String movesList, String moveBeforeAlternative, HashMap<String, String> map) {
