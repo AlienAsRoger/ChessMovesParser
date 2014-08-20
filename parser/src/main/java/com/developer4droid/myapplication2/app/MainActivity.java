@@ -35,95 +35,47 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 		HashMap<String, String> map = new HashMap<String, String>();
 
 		String finalMoves = removeCommentsAndAlternatesFromMovesList(movesList, map);
-//		String finalMoves = removeAlternateMoves(movesList, "", map);
+//		String finalMoves = mapAlternateMoves(movesList, "", map);
 		Log.d("TEST", finalMoves);
 	}
 
-	public String removeCommentsAndAlternatesFromMovesList(String movesList, HashMap<String, String> alterMovesMap) {
-		// replace all special symbols
-		movesList = replaceSpecialSymbols(movesList);
-
-		if (movesList.contains(ALTERNATE_MOVES_START)) {
-			movesList = removeAlternateMoves(movesList, Symbol.EMPTY, alterMovesMap);
-		}
-
-		while (movesList.contains(COMMENT_START)) {
-			int firstIndex = movesList.indexOf("{");
-			int lastIndex = movesList.indexOf("}") + 1;
-
-			String result = movesList.substring(firstIndex, lastIndex);
-			movesList = movesList.replace(result, Symbol.EMPTY);
-		}
-
-		return movesList.trim();
-	}
-
-	public String replaceSpecialSymbols(String movesList) {
-		for (String key : annotationsMapping.keySet()) {
-			movesList = movesList.replaceAll(key, annotationsMapping.get(key));
-		}
-		return movesList;
-	}
-
-	private int calculateEndIndexOfAlternates(String movesList) {
-		int start = movesList.indexOf(Symbol.LEFT_PAR);
-		int end = movesList.indexOf(Symbol.RIGHT_PAR);
-		if (start == -1) { // if no parenthesis, quit
-			return end;
-		}
-
-		if (end == -1) { // if there is no closing par-s
-			end = movesList.length() - 1;
-		}
-		int openingsCnt = 0;
-		// count opening par-s till the first closing par-s
-		for (int z = 0; z < end; z++) {
-			if (movesList.charAt(z) == '(') {
-				openingsCnt++;
-			}
-		}
-
-		if (openingsCnt > 1) { // if there are ( (() ) )
-			int closeCnt = 0;
-			int z = 0;
-			while (z < movesList.length()) {
-				if (movesList.charAt(z) == ')') {
-					closeCnt++;
-				}
-				if (closeCnt == openingsCnt) { // we reached same amount of opened par-s, break
-					break;
-				}
-				z++;
-			}
-			end = z;
-		}
-
-		return end;
-	}
-
-	public String removeAlternateMoves(String movesList, String moveBeforeAlternative, HashMap<String, String> map) {
+	public String mapAlternateMoves(String movesList, String moveBeforeAlternative, HashMap<String, String> map) {
 
 		// check if parenthesis inside of { }, if it's then skip as it is a comment and not alternative moves
-		int commentStartIndex = movesList.indexOf(COMMENT_START);
-		int commentCloseIndex = movesList.indexOf(COMMENT_CLOSE);
+		int commentCloseIndex = calculateCorrectBlockEndIndex(movesList, COMMENT_START, COMMENT_CLOSE);
 
 		int start = movesList.indexOf(Symbol.LEFT_PAR);
 		// check if there are more alternate moves inside of this moves sequence
-		int end = calculateEndIndexOfAlternates(movesList);
+		int end = calculateCorrectBlockEndIndex(movesList, Symbol.LEFT_PAR, Symbol.RIGHT_PAR);
 
 		// no need to parse anything
-		if (end == -1) {
+		if (end == 0) {
 			return movesList;
 		}
 
-		if (commentStartIndex < start && commentCloseIndex > start) { // if parenthesis inside of comments -> { () }
+		if (isUnderComment(movesList, start)) { // if parenthesis inside of comments -> { () }
 			// then search next parenthesis after comment -> { ( ( ) ( ) ) } ( )
-			String tempString = movesList.substring(commentCloseIndex + 1);
-			start = tempString.indexOf(Symbol.LEFT_PAR);
+			String commentString = movesList.substring(0, commentCloseIndex + 1); // we skip comment block and move caret to next opening par-s
+			String tempMovesList = movesList.substring(commentCloseIndex + 1); // move next part of string for analysis further
+
+			int alternativeBlockStartIndex = tempMovesList.indexOf(Symbol.LEFT_PAR);// in temp movesList
+			// now we check if next "(" is inside of comment and if it is, when skip till the next alternative moves block
+			while(isUnderComment(tempMovesList, alternativeBlockStartIndex)) { // start recursion
+				// find next closing comment symbol
+				commentCloseIndex = calculateCorrectBlockEndIndex(tempMovesList, COMMENT_START, COMMENT_CLOSE);
+				if (tempMovesList.length() <= commentCloseIndex) { // if we reached the end of
+					return movesList;
+				}
+				tempMovesList = tempMovesList.substring(commentCloseIndex + 1);
+				commentString += tempMovesList.substring(0, commentCloseIndex + 1);
+				alternativeBlockStartIndex = tempMovesList.indexOf(Symbol.LEFT_PAR); //
+			}
+			int commentLength = commentString.length();
+			start = tempMovesList.indexOf(Symbol.LEFT_PAR) + commentLength; // re-calculate start of new opening parenthesis
 			// check if there are more alternate moves inside of this moves sequence
-			end = calculateEndIndexOfAlternates(tempString);
+			end = calculateCorrectBlockEndIndex(tempMovesList, Symbol.LEFT_PAR, Symbol.RIGHT_PAR) + commentLength; // recalculate of new closing parenthesis
 			// no need to parse anything
-			if (end == -1) {
+			if (end == 0) {
 				return movesList;
 			}
 		}
@@ -137,7 +89,7 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 		} else {
 			clearMoves = movesList.substring(0, start); // remove alternate moves and parse further
 			alternateMoves = movesList.substring(start, end + 1);
-			substring = movesList.substring(end + 1);
+			substring = movesList.substring(end + 1);  // next part of MovesList that will be parsed further
 		}
 
 		if (map != null) { // only if we need those moves
@@ -145,7 +97,7 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 				String previousAlternativeMoves = map.get(moveBeforeAlternative);
 				alternateMoves = previousAlternativeMoves + " " + alternateMoves;
 				map.put(moveBeforeAlternative, alternateMoves);
-			} else { // save alternative moves in map with move before them
+			} else { // save alternative moves in map with move before it
 				String tempMove = Symbol.EMPTY;
 				for (int i = start - 2; i >= 0; i--) { // iterate down chars, and look for space
 					char charAt = movesList.charAt(i);
@@ -159,18 +111,107 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 					}
 
 					if (charAt == ' ' && tempMove.length() != 0) { // skip chars till next space
-						moveBeforeAlternative = new StringBuilder(tempMove).reverse().toString(); // reverse saved temp move
-						map.put(moveBeforeAlternative, alternateMoves);
+
 						break;
 					} else {
 						tempMove += charAt;
 					}
 				}
+				moveBeforeAlternative = new StringBuilder(tempMove).reverse().toString(); // reverse saved temp move
+
+				map.put(moveBeforeAlternative, alternateMoves);
 			}
 		}
 
-		String moves = removeAlternateMoves(substring, moveBeforeAlternative, map);
+		String moves = mapAlternateMoves(substring, moveBeforeAlternative, map);
 		return clearMoves + moves;
+	}
+
+	/**
+	 * Search for single opening comment symbol
+	 * @param movesList
+	 * @param startIndex
+	 * @return {@code true} if amount of open"{" symbol doesn't match closed "}"
+	 */
+	private boolean isUnderComment(String movesList, int startIndex) {
+		int openCnt = 0;
+		int closeCnt = 0;
+		for(int i = startIndex; i > 0; i--) {
+			if (movesList.charAt(i) == '{') { // if in this string we found an opening comment, then we shouldn't mark this block as alternative moves
+				openCnt++;
+			}
+			if (movesList.charAt(i) == '}') {
+				closeCnt++;
+			}
+		}
+		return openCnt > closeCnt;
+	}
+
+	private int calculateCorrectBlockEndIndex(String movesList, String startSymbol, String endSymbol) {
+		int start = movesList.indexOf(startSymbol);
+		int end = movesList.indexOf(endSymbol) + 1;
+		if (start == -1) { // if no parenthesis, quit
+			return end;
+		}
+
+		if (end == 0) { // if there is no closing par-s
+			end = movesList.length() - 1;
+		}
+		int openingsCnt = 0;
+		// count opening par-s till the first closing par-s
+		for (int z = 0; z < end; z++) {
+			if (movesList.charAt(z) == startSymbol.charAt(0)) {
+				openingsCnt++;
+			}
+		}
+
+		if (openingsCnt > 1) { // if there are ( (() ) )
+			openingsCnt = 0; // drop to calculate correctly
+			int closeCnt = 0;
+			int z = 0;
+			while (z < movesList.length()) {
+				// count opening par-s till we get same amount of blocks
+				if (movesList.charAt(z) == startSymbol.charAt(0)) {
+					openingsCnt++;
+				}
+				if (movesList.charAt(z) == endSymbol.charAt(0)) {
+					closeCnt++;
+				}
+				if (closeCnt == openingsCnt && closeCnt != 0) { // we reached same amount of opened par-s, break
+					break;
+				}
+				z++;
+			}
+			end = z;
+		}
+
+		return end;
+	}
+
+	public String replaceSpecialSymbols(String movesList) {
+		for (String key : annotationsMapping.keySet()) {
+			movesList = movesList.replaceAll(key, annotationsMapping.get(key));
+		}
+		return movesList;
+	}
+
+	public String removeCommentsAndAlternatesFromMovesList(String movesList, HashMap<String, String> alterMovesMap) {
+		// replace all special symbols
+		movesList = replaceSpecialSymbols(movesList);
+
+		if (movesList.contains(ALTERNATE_MOVES_START)) {
+			movesList = mapAlternateMoves(movesList, Symbol.EMPTY, alterMovesMap);
+		}
+
+		while (movesList.contains(COMMENT_START)) {
+			int firstIndex = movesList.indexOf("{");
+			int lastIndex = movesList.indexOf("}") + 1;
+
+			String result = movesList.substring(firstIndex, lastIndex);
+			movesList = movesList.replace(result, Symbol.EMPTY);
+		}
+
+		return movesList.trim();
 	}
 
 /*
@@ -234,7 +275,27 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 //		String movesList = "16...Ng4 $1 { Threats like 17...Qh4 and 17...Qf6 are very annoying. } 17.Rg1 ( 17.h3 Ne5 18.Qb5 Qh4 { leaves White in serious trouble since } 19.c5 $2 Bf5 { is completely winning. } ) ( 17.Bb2 Qh4 18.Rf1 { was White's best defense, though Black's initiative still gives him all the chances. } ) 17...Qf6 18.Rg2 Qa1+ 19.Ke2 Ne5 20.f4 Nxc4 { Of course,  } ( 20...Nxc6 { also won. } ) 21.Qh5 ( 21.Qxc7 Nxa3 22.Qxd6 Bh3 23.Rf2 Nc2 { is crushing. } )  21...Nxa3 22.Be4 g6 23.Qa5 Bh3 { , 0-1. }";
 //		String movesList = "46...Bb6 $1 47.Bxb6 ( 47.c7 Bxe3 48.d7 ( 48.Rxf2 Bxf2 49.d7 Rg8 $1 50.h4 Rg1+ 51.Kh2 Bg3+ $1 52.Kxg1 Bxc7 ) 48...Rg8 49.h4 ( 49.d8=Q Rg1+ 50.Rxg1 fxg1=Q# ) 49...Rg1+ 50.Kh2 Rxf1 51.d8=Q Rh1+ 52.Kg3 ( 52.Kxh1 f1=Q+ 53.Kh2 Bf4# ) 52...Rg1+ 53.Kh2 Bf4+ ( 53...f1=N+ 54.Kh3 Rg3# ) 54.Kh3 f1=Q# ) 47...axb6 48.Rxf2 e3 $3 49.Rxf8 d2 50.c7 d1=Q+ 51.Kg2 Qg4+ 52.Kf1 Qc4+ 53.Kg2 e2 54.Kf2 ( 54.c8=Q Qxc8 55.Rxc8 e1=Q 56.Rf8 Qd2+ 57.Rf2 Qxd6 ) 54...Qe6 55.Ke1 Qxd6 56.Rh8+ Kg6 $1 ( 56...Kxh8 $4 57.c8=Q+ Kh7 58.Qc2+ ) 57.Rg8+ Kh5 { , 0-1. } ";
 //		String movesList = "12.Bd3 Qb6 { Black has a wealth of good choices: } ( 12...Qh4+ 13.g3 Qe7 ) ( 12...Rb8 { and even } ) ( 12...O-O { since } 13.O-O { allows } 13...Qb6+ { picking up the b4-pawn. } ) 13.Rb1 O-O ( 13...Qe3+ 14.Ne2 g5 { undermining the e5-pawn is also good. } ) 14.Qe2 f6 ( 14...a5 $1 { is probably even stronger. I'm just trying to show that Black has far more dynamic options than White has. } ) 15.Qh5 f5 16.Qe2 Qd4 17.Qd2 a5 18.a3 axb4 19.axb4 Ra3 20.Ne2 Qa7 { and Black's in command (White's king is in the middle and Black's pawn breaks (...c6-c5 and ...g7-g5) are itching to be played. } ";
-	String movesList = "23...Re7 $3 { White's troubles are exacerbated by the fact that he really has\n" +
+//	String movesList = "24.Kg1⁈ { Karpov does little irreversible damage with this move, but it is\n" +
+//		"certainly a step in the wrong direction. In order to neutralize Black's\n" +
+//		"dangerous central operation, energetic and accurate play was required: } ( 24.Bd4! Bxd4 25.Nxd4 e5! 26.fxe5 ( 26.Qh4⁉ Nf8 27.Nde2 exf4 28.Nxf4 Rce8 { Once again, White is not objectively worse, but Black's central pressure\n" +
+//		"guarantees him very comfortable play for the foreseeable future. } ) 26...dxe5 27.Nf3 ( 27.Nb3 Rf8! 28.Qd2 f6 ) 27...Rf8 28.Qh4 f6 29.gxf6 Nxf6 30.Ng5 Nh5 31.Rxf8+ Kxf8 32.Bf3 Nf6 { White maintains certain attacking\n" +
+//		"chances, but with excellent piece coordination and steady central pressure,\n" +
+//		"Black is certainly not worse. Of course, such a position did not suit Karpov\n" +
+//		"-  if he is circumspect, Black is hardly in danger of losing. } ) ( 24.Rd1 f5 25.gxf6 Nxf6⁉ 26.Bxb6 Ng4 27.Qg1 Qb8 ) 24...Rce8 { Black follows through\n" +
+//		"on his plan (and, as a bonus, stops f4-f5 once and for all), but as Kasparov\n" +
+//		"notes, there was no need for such thorough preparation. The immediate } ( 24...f5! { would have confronted White with serious problems. For instance, } 25.gxf6 Bxf6 26.Qd2 ( 26.f5 exf5 27.exf5 Bxg2 28.Qxg2 Qc6 { (Kasparov) } ) 26...Bg7 27.f5 exf5 28.exf5 Bxg2 29.Qxg2 Qc6 30.Qg5 Rce8 { and despite the\n" +
+//		"extreme complexity of the position, it appears that White can only level the\n" +
+//		"boat through a series of only computer moves. I have no interest in\n" +
+//		"over-analyzing this position: it is clear that ...f5 would have posed serious\n" +
+//		"objective problems. } ) 25.Rd1 f5! { Black's plan has worked perfectly, but\n" +
+//		"White has improved his position just enough to neutralize the pressure. } 26.gxf6 Nxf6 { Bravely played! Black sacrifices a pawn, relying on the activity of\n" +
+//		"his pieces to serve as adequate compensation. Unwilling to calculate the\n" +
+//		"ramifications of 27.Bxb6, Karpov makes a neutral move: } 27.Rg3 { An indolent\n" +
+//		"move after which Kasparov's pieces come into play with savage effect. To be\n" +
+//		"sure, White's position is still very much playable, but the real test of\n" +
+//		"Black's strategy was the \"greedy\" } ";
+
+		String movesList = "23...Re7 $3 { White's troubles are exacerbated by the fact that he really has\n" +
 			"no effective way of stopping Black's plan (...Rce8 followed by ...f5). Not\n" +
 			"sensing the danger, Karpov continues playing in his characteristically\n" +
 			"unhurried style. } ( 23...Nc5 $2 24.Bd4 $1 { and Black is forced to acquiesce\n" +
@@ -298,4 +359,66 @@ public class MainActivity extends ActionBarActivity implements View.OnClickListe
 			"the match, of course, so this is technically a moot point): } 41...Na3 42.Qd3 Ra2 43.g6 $1 h6 { and now the improbable } 44.Rxh6+ $1 { achieves perpetual: } 44...Bxh6 45.Qc3+ Bg7 ( 45...Kg8 46.Qb3+ Kg7 47.Qxa2 Qd7 48.Nf2 { and White can\n" +
 			"suddenly play for a win! } ) 46.Qh3+ Kg8 47.Qb3+ Kf8 48.Qb4+ Qe7 49.Qb8+ Qe8 50.Qb4+ ) 40...Qa7+ $1 { An elegant finishing touch. White's position\n" +
 			"comes apart at the seams. } 41.Kh1 Bxg2+ 42.Kxg2 Nd4+ ";
+
+//	String movesList = "30.bxa3 Rd8 31.Rb2 Rc7 32.Rb5 Rdd7 33.Kf2 { Another sign of finesse: Rozentalis does\n" +
+//			"not hurry to double on the b-file. Who knows - maybe the rook will be needed\n" +
+//			"on f1 to prevent ...Kf7 or attack the f5 pawn. } 33...g6 34.Ke3 Kg7 35.Rfb1 Kf7 36.Rc5! { Another beautiful concept, although straightforward play seems to do\n" +
+//			"the trick as well. Taking the rook is tantamount to suicide (the White king is\n" +
+//			"granted a monstrous outpost on d4), so Black must allow a further penetration. } ( 36.Bf3⁉ Ke7 37.Kf4 h6 38.a6! bxa6 ( 38...b6 39.a4 { with the crushing\n" +
+//			"a5 to follow. } ) 39.Ra5 Rc6 40.Bd1 Rb6 41.Rxb6 axb6 42.Rxa6 b5 43.g4 { and\n" +
+//			"Black should not be able to hold his position for much longer. } 43...Rd8 ) 36...Ke7 37.Rbb5 Rxc5 38.dxc5! Kd8 { This allows a pretty finale, but Black can\n" +
+//			"hardly be critcized for not putting up a tenacious resistance in such a\n" +
+//			"miserable position. } ( 38...Rc7! { was the only way to prolong the fight,\n" +
+//			"although White still wins with } 39.Kd4 Bd7 40.Rb4 Bc6 41.a6‼ bxa6 42.Rb8 { and the dam bursts. } ) 39.a6! Kc8 ( 39...bxa6 40.Ra5 ) 40.Rb6‼ { Rozentalis outdoes himself yet again! The rook is untouchable, and Black is\n" +
+//			"forced to make yet another  -  fatal  -  concession. } 40...Bg8 ( 40...axb6 41.a7 { and the pawn is unstoppable. A position that truly epitomizes the beauty of\n" +
+//			"chess, wouldn't you say? } ) 41.Rf6 ( 41.e6! Re7 42.axb7+ Kb8 43.Rd6 Bxe6 44.c6 { was even more accurate. } ) 41...Rd8 42.Kd4 bxa6 43.Rd6";
+//	String movesList = "26.Qd1 $1 Rc8 27.a5 { For the moment, White grabs much-needed space and bides\n" +
+//			"his time (the a5 pawn will always be safely defended by the queen from a1).\n" +
+//			"The immediate } ( 27.b3 $2 { fails to impress after } 27...cxb3 28.Qxb3 Rc4 29.a5 Qd8 { when it is clear that White has acted prematurely. } ) 27...Rcf8 $2 { In fact,\n" +
+//			"this is a serious error which allows White to execute his stupendous plan\n" +
+//			"undeterred. At first sight, it appears that Black can afford to move his\n" +
+//			"pieces back  -   his position is extremely solid. 28.b3 is a shot into thin air\n" +
+//			"(see note to White's 28th move). Once again, Rozentalis determines that to\n" +
+//			"make progress, he must improve all of his pieces to the maximum. The rooks and\n" +
+//			"bishop are doing all they can, but the queen is still quite passive. Can it be\n" +
+//			"rerouted to a better square? You bet! } ( 27...g6 { In perfect hindsight, it is\n" +
+//			"clear that Black should have paid more heed to White's queenside expansion. If\n" +
+//			"he keeps his queen on d8 and rook on c6, it turns out that White has a very\n" +
+//			"difficult time making any dents on the queenside (...g6 is played to free the\n" +
+//			"queen from the onerous task of defending f5). } 28.Qa1 Rc6 $1 29.Qa3 Qd8 { and\n" +
+//			"while White can certainly try to play b2-b3 at a timely moment, Black's\n" +
+//			"chances to hold are very high. } ) 28.Qa1 $1 Qe7 { As the Russians would say,\n" +
+//			"this is the \"salt\" (i.e. the fine point, the justification) of Black's idea.\n" +
+//			"Both the a3 and a4 squares (due to ...Bd7) are taken away from White's queen,\n" +
+//			"and the threat of ...f4 is a force to be reckoned with. Recall, however, that\n" +
+//			"the original idea of White's whole queenside operation was to open the b-file.\n" +
+//			"And is b2-b3 the only way to do so? } 29.Qa3 $3 { Absolutely not!! A move of\n" +
+//			"astounding depth. Considering that White's pawn structure is irreparably\n" +
+//			"ruined after the queen trade, this is an incredibly difficult move to make,\n" +
+//			"but a GM ain't a GM for nothing! The opening of the b-file  -  ruined pawn\n" +
+//			"structure aside  -  will allow the White rooks to pressure b7 and d5 (from b5)\n" +
+//			"simultaneously. Meanwhile, the passivity of Black's pieces will doom any\n" +
+//			"long-term defense from the start. Appel fails to acknowledge the correctness\n" +
+//			"of White's idea, and allows Rozentalis to bring the game to an astounding\n" +
+//			"conclusion. } 29...Qxa3 $2 { A myopic decision. The endgame will be objectively\n" +
+//			"defensible (i.e. Black does not lose by force), but from a practical\n" +
+//			"standpoint, flawless defense will be nearly impossible. As GM Rowson notes, } ( 29...Rd8 $1 { was far more resilient. Now, White can choose between a few ways\n" +
+//			"to keep the pressure going: } 30.Qxe7 { This is the computer's recommendation,\n" +
+//			"and I think the queen certainly does not favor Black. After } ( 30.Ra1 $5 { is\n" +
+//			"Rowson's suggestion, but I am not sure it is a good idea to give Black the\n" +
+//			"opportunity to refuse the queen trade. Even so, after } 30...Qe8 31.Qb4 g6 32.Bf3 Qd7 { White is certainly better, but at least Black has succesfully regrouped. } ) 30...Rxe7 31.Bh3 g6 32.Kg2 Kg7 33.Kf3 Rc8 34.Kf4 Rc6 35.Ra1 { White will\n" +
+//			"transfer his bishop to g2 and his rooks to a4 and a3 in preparation for b3. It\n" +
+//			"is difficult to provide an accurate evaluation of the position, but I would\n" +
+//			"put the winning chances/drawing chances relation at about 60%-40%. } ) 30.bxa3 Rd8 31.Rb2 Rc7 32.Rb5 Rdd7 33.Kf2 { Another sign of finesse: Rozentalis does\n" +
+//			"not hurry to double on the b-file. Who knows - maybe the rook will be needed\n" +
+//			"on f1 to prevent ...Kf7 or attack the f5 pawn. } 33...g6 34.Ke3 Kg7 35.Rfb1 Kf7 36.Rc5 $1 { Another beautiful concept, although straightforward play seems to do\n" +
+//			"the trick as well. Taking the rook is tantamount to suicide (the White king is\n" +
+//			"granted a monstrous outpost on d4), so Black must allow a further penetration. } ( 36.Bf3 $5 Ke7 37.Kf4 h6 38.a6 $1 bxa6 ( 38...b6 39.a4 { with the crushing\n" +
+//			"a5 to follow. } ) 39.Ra5 Rc6 40.Bd1 Rb6 41.Rxb6 axb6 42.Rxa6 b5 43.g4 { and\n" +
+//			"Black should not be able to hold his position for much longer. } 43...Rd8 ) 36...Ke7 37.Rbb5 Rxc5 38.dxc5 $1 Kd8 { This allows a pretty finale, but Black can\n" +
+//			"hardly be critcized for not putting up a tenacious resistance in such a\n" +
+//			"miserable position. } ( 38...Rc7 $1 { was the only way to prolong the fight,\n" +
+//			"although White still wins with } 39.Kd4 Bd7 40.Rb4 Bc6 41.a6 $3 bxa6 42.Rb8 { and the dam bursts. } ) 39.a6 $1 Kc8 ( 39...bxa6 40.Ra5 ) 40.Rb6 $3 { Rozentalis outdoes himself yet again! The rook is untouchable, and Black is\n" +
+//			"forced to make yet another  -  fatal  -  concession. } 40...Bg8 ( 40...axb6 41.a7 { and the pawn is unstoppable. A position that truly epitomizes the beauty of\n" +
+//			"chess, wouldn't you say? } ) 41.Rf6 ( 41.e6 $1 Re7 42.axb7+ Kb8 43.Rd6 Bxe6 44.c6 { was even more accurate. } ) 41...Rd8 42.Kd4 bxa6 43.Rd6 ";
 }
